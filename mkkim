@@ -1,0 +1,277 @@
+#!/bin/bash
+#                                                Kent Milfeld 1/19/2017
+VER=1.9.2 
+KIM=kim-api-v$VER
+DEFAULT_BASE_DIR=$HOME/kim
+BASE_DIR=$DEFAULT_BASE_DIR
+
+#KIM_MO=EDIP_BOP_Belko_Gusakov_Dorozhkin_Ge__MO_129433059219_000
+ KIM_MO=MSMEAM_Gibson_Ti__MO_309653492217_000
+
+#KIM_MD=MSMEAM_Gibson_Ti__MO_309653492217_000
+ KIM_MD=MSMEAM_Dynamo_Gibson_Baskes__MD_080127949983_000
+
+VC_DIR=vc_forces_numer_deriv
+
+#                          Determine what to do
+#               BUILD_KIM, GET a COLLECTION, or Make the Driver
+
+         MK_KIM=BUILD_KIM
+
+if [[ $1 ]]; then
+   if [[ $1 == build || $1 == collection || $1 == driver ]] ; then
+
+      [[ $1 == build      ]] && MK_KIM=BUILD_KIM
+      [[ $1 == collection ]] && MK_KIM=GET_COLLECTION
+      [[ $1 == driver     ]] && MK_KIM=MAKE_DRIVER
+
+   else
+      echo ""
+      echo "USAGE: $0 [build|collection|driver]  #default is \"build\" kim "
+      echo ""
+      exit 1
+   fi
+fi
+
+
+#---------------------------------BUILD_KIM---------------------------------------------------#
+
+if [[ "$MK_KIM" == "BUILD_KIM" ]]; then
+
+   ###########  CHECKING COMPILER USAGE
+   
+   # Requirement:  Must be on TACC system (or set OPTS yourself).
+   # Requirement:  If on Stampede, must use Intel/18.0.0
+   
+   if [[ -z $TACC_SYSTEM ]]; then
+       echo "   WARNING: This is not a TACC system."  
+       echo "      PLEASE set value of OPTS to an appropriate INTEL Compiler Vector option."
+       exit 2
+   else
+      if [[ -z $TACC_VEC_FLAGS ]]; then
+          echo "   ERROR: For TACC system TACC_VECT_FLAGS must be set."
+          echo "       On Stampede2 you must load the Intel 18.0.0 compiler first."
+          echo "   Execute:"
+          echo "          module load intel/18.0.0"
+          echo ""
+          exit 3
+      fi
+   fi
+   
+   ###########  CHECKING ON KIM-API-Vx.y.z
+   
+   
+   BASE_DIR=$DEFAULT_BASE_DIR
+   
+   # if [[ $1 ]]; then
+   #    echo ""
+   #    echo " Changing the BASE DIRECTORY to $1".
+   #    echo ""
+   #    BASE_DIR=$1
+   #    if [[ ! -d $BASE_DIR/$KIM ]]; then
+   #       echo " ERROR: The $BASE_DIR/$KIM directory does not exist."
+   #       echo "        Please make sure that you have untarred kim into $BASE_DIR."
+   #       echo "        That is, $BASE_DIR/$KIM should exist before you execute $0 $1."
+   #       echo ""
+   #       exit 4
+   #    fi
+   # fi
+   # 
+   # if [[ ! -d $BASE_DIR ]]; then
+   #    echo ""
+   #    echo " USAGE: $0 [BASE_DIRETORY] "
+   #    echo "        The BASE DIRECTORY, $BASE_DIR, does not exit."
+   #    echo "        Either change the BASE_DIR in $0, or"
+   #    echo "        execute $0 with the BASE DIRECTORY name \(e.g. \$HOME/local\)."
+   #    echo ""
+   #    echo "        Note: $KIM must exist \(be untarred\) in the BASE DIRECTORY."
+   #    echo "              The default base directory is $DEFAULT_BASE_DIR."
+   #    echo ""
+   #    exit 5
+   # fi
+ 
+   if [[ ! -d $BASE_DIR ]]; then
+      echo ""
+      echo " USAGE: $0    #kim-api-v$VER must exist in this directory"
+      echo ""
+      echo "        Note: $KIM must exist \(be untarred\) in this BASE DIRECTORY."
+      echo "              The default base directory is $DEFAULT_BASE_DIR."
+      echo ""
+      exit 4
+   fi
+ 
+ 
+   ###########  PATCHING
+
+   
+   # Use appropriate compiler options for system
+   # FFLAGS   = -O3 -g -warn all
+   # CFLAGS   = -O3 -g -Wall -ansi -pedantic
+   # CXXFLAGS = -O3 -g -Wall -ansi -pedantic
+   #  -warn all and -Wall are not Intel Compiler options
+   #  
+   # Change -warn all and -Wall to:
+   #  TACC_VEC_FLAGS=-xCORE-AVX2 -axCORE-AVX512,MIC-AVX512
+   # Move "-c" to the beginning of of the command in vc_forces_numer_deriv/Makefile
+   
+   #For Stampede2, Intel 18+ compiler use: -xCORE-AVX2 -axCORE-AVX512,MIC-AVX512
+   #For Stampede2, Intel 18+ TACC_VEC_FLAGS gives appropriate VECTOR options
+   #BUT, must make sure 18+ (18.0.0) compiler is used for TACC_VEC_FLAGS to be defined.
+   
+   FILE=${BASE_DIR}/${KIM}/build_system/compiler_defaults/Makefile.INTEL
+   
+   OPTS="$TACC_VEC_FLAGS -diag-disable=cpu-dispatch"
+   
+   echo ""
+   echo " Patching $FILE."
+   echo "          to include $OPTS compiler options."
+   echo ""
+   sed -i "s/FFLAGS   = -O3 -g -warn all/FFLAGS   = -O3 -g $OPTS/"                             $FILE
+   sed -i "s/CFLAGS   = -O3 -g -Wall -ansi -pedantic/CFLAGS   = -O3 -g $OPTS -ansi -pedantic/" $FILE
+   sed -i "s/CXXFLAGS = -O3 -g -Wall -ansi -pedantic/CXXFLAGS = -O3 -g $OPTS -ansi -pedantic/" $FILE
+   
+   
+   FILE=${BASE_DIR}/${KIM}/examples/openkim_tests/vc_forces_numer_deriv/Makefile
+   
+   # Correct the Makefile in vc_forces_numer_deriv
+   # For Intel compiler does not like "ifort .... -c  <name>.F90".
+   # Move "-c" to the beginning of of the command in vc_forces_numer_deriv/Makefile
+   
+   #sed -i 's/	$(FC) $(INCLUDES) $(FFLAGS) $(OBJONLYFLAG) $</	$(FC) $(OBJONLYFLAG) $(INCLUDES) $(FFLAGS) $</' $FILE
+   
+   # Also requires: -free -cpp -Tf  -$(FFREEFLAG) -$(FCPPFLAG) -$(FFORTRANFILEFLAG) 
+   
+   
+   
+   echo " Patching $FILE."
+   echo "          to use -c as the first option and"
+   echo "          to use Intel -free -cpp -Tf options."
+   echo ""
+   
+#   sed -i 's/	$(FC) $(INCLUDES) $(FFLAGS) $(OBJONLYFLAG) $</	$(FC) $(OBJONLYFLAG) $(INCLUDES) $(FFLAGS) $(FFREEFLAG) $(FCPPFLAG) $(FFORTRANFILEFLAG)  $</' $FILE
+   sed -i 's/	$(FC) $(INCLUDES) $(FFLAGS) $(OBJONLYFLAG) $</	$(FC) $(OBJONLYFLAG) $(INCLUDES) $(FFLAGS) -free -cpp -Tf  $</' $FILE
+   
+   
+   
+   ###########  CHECKING ON KIM-API-Vx.y.z
+   
+   
+   cd  $BASE_DIR/$KIM
+   
+   echo " Starting KIM build."
+   echo ""
+   echo "  CONFIGURING: "
+   echo "              ./configure --compiler-suite=INTEL --system-linker=linux --system-arch=64bit --prefix=${HOME}/kim"
+   
+                       ./configure --compiler-suite=INTEL --system-linker=linux --system-arch=64bit --prefix=${HOME}/kim
+   
+   echo ""
+   echo "  MAKE: "
+   echo "              make"
+                       make 
+   
+   echo ""
+   echo "  MAKE INSTALL "
+   echo "              make install"
+                       make install 
+   
+   
+   
+   ###########  PUT PATH IN $HOME/.bashrc
+   
+   
+   echo " Checking for the addition of $BASE_DIR/bin to PATH in \$HOME/.bashrc."
+   
+   echo "       grep -e \"#KIM_BIN_PATH=$BASE_DIR/bin\"           \$HOME/.bashrc"
+                grep -e  "#KIM_BIN_PATH=$BASE_DIR/bin"   $HOME/.bashrc  2>&1 >>/dev/null
+   
+   if [[ $? == 0 ]]; then
+      echo " Note: $BASE_DIR/bin is already add to PATH in \$HOME/.bashrc."
+   else
+      echo " Note: Including $BASE_DIR/bin in PATH at the end of your \$HOME/.bashrc."
+   
+      readarray message <<-EOF
+        :
+        :###############
+        :# SECTION KIM
+        :if [ -z "\$__KIM_PERSONAL_PATH__" ]; then
+        :    export   __KIM_PERSONAL_PATH__=1
+        :    export PATH=$BASE_DIR/bin:\$PATH  #KIM_BIN_PATH=$BASE_DIR/bin
+        :fi
+	EOF
+   	#Above EOF must have a tab before it, and nothing else (NO SPACES, just a tab)!
+   
+                         #lop off spaces up to and including ":", and print
+      shopt -s extglob
+      printf '%s' "${message[@]#+( ):}" >> $HOME/.bashrc
+      shopt -u extglob
+   
+   fi
+   echo ""
+   
+   
+   
+   
+   ###########  PUT DERIVATIVE DIRECTIVE IN PLACE
+   
+   
+   echo ""
+   echo " MOVING TESTS INTO PLACE"
+   echo " cp -r $BASE_DIR/$KIM/examples/openkim_tests/$VC_DIR  ${BASE_DIR}/"
+  
+          cp -r $BASE_DIR/$KIM/examples/openkim_tests/$VC_DIR  "${BASE_DIR}/"
+  
+   echo ""
+
+fi
+
+#---------------------------------GET COLLECTION---------------------------------------------------#
+
+
+if [[ "$MK_KIM" == "GET_COLLECTION" ]]; then
+
+   #kim-api-v1-collections-management install system $KIM_MD
+
+   # We need to roll our own version here:
+
+   cd $BASE_DIR//lib/kim-api-v1/model_drivers
+   wget https://openkim.org/download/MSMEAM_Dynamo_Gibson_Baskes__MD_080127949983_000.txz
+   tar -Jxvf MSMEAM_Dynamo_Gibson_Baskes__MD_080127949983_000.txz
+   cd MSMEAM_Dynamo_Gibson_Baskes__MD_080127949983_000
+
+   # Fix makefile to find use (one of the many) Makefile.KIM_Config files.
+   sed -i s'@include ../Makefile.KIM_Config@include ../../Makefile.KIM_Config@' Makefile
+
+   make
+
+   kim-api-v1-collections-management install system $KIM_MO
+   
+fi
+
+#---------------------------------MAKE_DRIVER---------------------------------------------------#
+
+
+if [[ "$MK_KIM" == "MAKE_DRIVER" ]]; then
+
+   cd $BASE_DIR/$VC_DIR
+   
+   make
+   
+   echo ""
+   echo "INSTRUCTIONS:"
+   echo ""
+   echo "  cd $BASE_DIR/vc_forces_numer_deriv"
+   echo ""
+   echo "NOW EXECUTE:" 
+   echo ""
+   echo "echo MSMEAM_Gibson_Ti__MO_309653492217_000 | /usr/bin/time -p ./vc_forces_numer_deriv"
+   echo "or"
+   echo ""
+   echo "/usr/bin/time -p ./vc_forces_numer_deriv<<EOF"
+   echo "$KIM_MO"
+   echo "EOF"
+   echo ""
+   echo "Go to $BASE_DIR//lib/kim-api-v1/model_drivers to modify the MSMEAM_model_driver.F03 driver file"
+   echo "See instruction in kim_readme file"
+
+fi
